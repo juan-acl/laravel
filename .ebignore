@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+node_modules
+vendor
+tests
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+database/*.sqlite
+database/*.sqlite-*
+.env*
+auth.json
+.mcp.json

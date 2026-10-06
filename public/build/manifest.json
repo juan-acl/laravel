@@ -1,6 +1,6 @@
 {
   "resources/css/ruleta.css": {
-    "file": "assets/ruleta-B8WBGgOB.css",
+    "file": "assets/ruleta-ywY014SP.css",
     "name": "ruleta",
     "names": [
       "ruleta.css"
@@ -9,7 +9,7 @@
     "isEntry": true
   },
   "resources/js/ruleta.js": {
-    "file": "assets/ruleta-CfKJptov.js",
+    "file": "assets/ruleta-Bg8x3IBY.js",
     "name": "ruleta",
     "src": "resources/js/ruleta.js",
     "isEntry": true

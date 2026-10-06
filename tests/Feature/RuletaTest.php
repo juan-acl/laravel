@@ -4,15 +4,18 @@ test('serves the game page and application health check', function () {
     $this->get(route('home'))
         ->assertSuccessful()
         ->assertSee('PREGUNTAS DE AWS PARA JUGAR EN EQUIPO')
+        ->assertSee('data-total="14"', false)
+        ->assertSee('data-rounds="2"', false)
+        ->assertSee('id="temporizador"', false)
         ->assertSee('id="girar"', false);
 
     $this->get('/up')->assertSuccessful();
 });
 
-test('starts a game with seven questions from the code bank', function () {
+test('starts a game with fourteen questions for two rounds', function () {
     $this->postJson(route('ruleta.iniciar'))
         ->assertSuccessful()
-        ->assertExactJson(['total' => 7]);
+        ->assertExactJson(['total' => 14]);
 });
 
 test('does not allow a turn before starting a game', function () {
@@ -21,16 +24,21 @@ test('does not allow a turn before starting a game', function () {
         ->assertJson(['message' => 'Partida no iniciada']);
 });
 
-test('assigns every group and question exactly once per game', function () {
+test('assigns every group once per round and every question once per game', function () {
     $this->postJson(route('ruleta.iniciar'))->assertSuccessful();
 
     $grupos = [];
     $preguntas = [];
 
-    for ($turno = 0; $turno < 7; $turno++) {
+    for ($turno = 0; $turno < 14; $turno++) {
+        $turnoRonda = ($turno % 7) + 1;
+        $ronda = intdiv($turno, 7) + 1;
         $respuesta = $this->postJson(route('ruleta.girar'))
             ->assertSuccessful()
-            ->assertJsonPath('quedan', 6 - $turno);
+            ->assertJsonPath('quedan', 13 - $turno)
+            ->assertJsonPath('ronda', $ronda)
+            ->assertJsonPath('turno', $turno + 1)
+            ->assertJsonPath('turnoRonda', $turnoRonda);
         $resultado = $respuesta->json();
 
         $grupos[] = $resultado['grupo'];
@@ -40,11 +48,13 @@ test('assigns every group and question exactly once per game', function () {
             ->and(array_unique($resultado['opciones']))->toHaveCount(4)
             ->and($resultado)->not->toHaveKey('respuesta')
             ->not->toHaveKey('correcta');
-        expect($resultado['gruposUsados'])->toHaveCount($turno + 1);
+        expect($resultado['gruposUsados'])->toHaveCount($turnoRonda)
+            ->and(array_unique(array_slice($grupos, $turno - ($turno % 7))))->toHaveCount($turnoRonda);
     }
 
-    expect(array_unique($grupos))->toHaveCount(7)
-        ->and(array_unique($preguntas))->toHaveCount(7);
+    expect(array_unique(array_slice($grupos, 0, 7)))->toHaveCount(7)
+        ->and(array_unique(array_slice($grupos, 7, 7)))->toHaveCount(7)
+        ->and(array_unique($preguntas))->toHaveCount(14);
 
     $this->postJson(route('ruleta.girar'))
         ->assertSuccessful()

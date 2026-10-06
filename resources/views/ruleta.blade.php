@@ -15,6 +15,7 @@
     class="game-page"
     data-groups="{{ $grupos }}"
     data-total="{{ $total }}"
+    data-rounds="{{ $rondas }}"
     data-start-url="{{ route('ruleta.iniciar') }}"
     data-spin-url="{{ route('ruleta.girar') }}"
     data-answer-url="{{ route('ruleta.respuesta', ['slot' => '__SLOT__']) }}"
@@ -41,7 +42,7 @@
         <div class="topbar__right">
             <div class="rounds-pill" aria-live="polite">
                 <span class="rounds-pill__pulse" aria-hidden="true"></span>
-                <span id="quedan">7 TURNOS</span>
+                <span id="quedan">{{ $total }} TURNOS</span>
             </div>
             <button class="icon-button sound-toggle" id="sonido" type="button" aria-pressed="true" aria-label="Desactivar sonido">
                 <svg class="sound-toggle__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -150,6 +151,24 @@
                     <span class="question-card__quote" aria-hidden="true">“</span>
                     <h1 id="enunciado" aria-live="polite">Reúne a tu equipo. La nube tiene un reto para ustedes.</h1>
                 </div>
+                <div class="answer-timer" id="temporizador" role="timer" aria-label="Tiempo para responder" hidden>
+                    <div class="answer-timer__heading">
+                        <span>TIEMPO PARA RESPONDER</span>
+                        <strong id="tiempoRestante">30 s</strong>
+                    </div>
+                    <div
+                        class="answer-timer__track"
+                        id="barraTiempo"
+                        role="progressbar"
+                        aria-label="Tiempo restante"
+                        aria-valuemin="0"
+                        aria-valuemax="30"
+                        aria-valuenow="30"
+                    >
+                        <span class="answer-timer__fill" id="rellenoTiempo"></span>
+                    </div>
+                    <p class="answer-timer__scoring">Correcta: 10 puntos · rapidez: +3 en 10 s, +2 en 20 s o +1 en 30 s</p>
+                </div>
                 <div
                     class="answer-options"
                     id="opciones"
@@ -200,14 +219,14 @@
             <div class="scoreboard__summary">
                 <span>7 EQUIPOS</span>
                 <span class="scoreboard__dot" aria-hidden="true"></span>
-                <span>UNA PREGUNTA POR GRUPO</span>
+                <span>DOS RONDAS · 14 PREGUNTAS</span>
             </div>
             <div class="score-list" id="marcador" aria-live="polite" aria-relevant="additions text"></div>
             <div class="scoreboard__footer">
                 <span class="scoreboard__footer-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none"><path d="m13 2-9 12h7l-1 8 10-13h-7l1-7Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </span>
-                <p>¿Respuesta correcta?<br><strong>+10 puntos</strong> para tu equipo</p>
+                <p>¿Respuesta correcta?<br><strong>10 puntos + rapidez</strong> para tu equipo</p>
             </div>
         </aside>
     </main>

@@ -1,5 +1,7 @@
 const page = document.body;
 const groupCount = Number(page.dataset.groups);
+const roundCount = Number(page.dataset.rounds);
+const answerTimeLimit = 30;
 let questionCount = Number(page.dataset.total);
 const teamNumbers = [1, 2, 3, 4, 5, 6, 8];
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
@@ -28,6 +30,8 @@ const questionColors = [
     '#6F7B72',
 ];
 const score = Array(groupCount).fill(0);
+const correctAnswers = Array(groupCount).fill(0);
+const correctAnswerTimes = Array(groupCount).fill(0);
 const groupWheel = document.getElementById('rGrupo');
 const questionWheel = document.getElementById('rPregunta');
 const groupContext = groupWheel.getContext('2d');
@@ -41,6 +45,10 @@ const actions = document.getElementById('acciones');
 const answerOptions = document.getElementById('opciones');
 const answerBox = document.getElementById('respuesta');
 const errorBox = document.getElementById('error');
+const answerTimer = document.getElementById('temporizador');
+const remainingTimeLabel = document.getElementById('tiempoRestante');
+const timerTrack = document.getElementById('barraTiempo');
+const timerFill = document.getElementById('rellenoTiempo');
 const questionHeading = document.getElementById('enunciado');
 const gameStatus = document.getElementById('estadoPartida');
 const groupWheelWrap = groupWheel.closest('.wheel-wrap');
@@ -53,6 +61,10 @@ let rotationGroups = 0;
 let rotationQuestions = 0;
 let currentTurn = null;
 let currentGroup = null;
+let currentRound = 1;
+let questionStartedAt = 0;
+let answerDeadline = 0;
+let answerTimerInterval = null;
 let isFinished = false;
 let isSpinning = false;
 let soundEnabled = localStorage.getItem('ruleta-sound') !== 'off';
@@ -78,6 +90,76 @@ function getContrastColor(hexColor) {
     const contrastWithDark = (luminance + 0.05) / (darkTextLuminance + 0.05);
 
     return contrastWithWhite > contrastWithDark ? '#FFFFFF' : '#101724';
+}
+
+function updateAnswerTimer() {
+    const remainingMilliseconds = Math.max(
+        0,
+        answerDeadline - performance.now(),
+    );
+    const remainingSeconds = Math.ceil(remainingMilliseconds / 1000);
+    const progress = remainingMilliseconds / (answerTimeLimit * 1000);
+
+    remainingTimeLabel.textContent = `${remainingSeconds} s`;
+    timerTrack.setAttribute('aria-valuenow', String(remainingSeconds));
+    timerFill.style.transform = `scaleX(${progress})`;
+    answerTimer.classList.toggle('is-urgent', remainingSeconds <= 10);
+
+    return remainingMilliseconds;
+}
+
+function stopAnswerTimer() {
+    if (answerTimerInterval !== null) {
+        window.clearInterval(answerTimerInterval);
+        answerTimerInterval = null;
+    }
+}
+
+function startAnswerTimer(
+    deadline = performance.now() + answerTimeLimit * 1000,
+) {
+    answerDeadline = deadline;
+    questionStartedAt = deadline - answerTimeLimit * 1000;
+    answerTimer.hidden = false;
+    updateAnswerTimer();
+    stopAnswerTimer();
+    answerTimerInterval = window.setInterval(() => {
+        if (updateAnswerTimer() <= 0) {
+            expireCurrentQuestion();
+        }
+    }, 100);
+}
+
+function expireCurrentQuestion() {
+    if (!currentTurn || currentTurn.responded) {
+        return;
+    }
+
+    stopAnswerTimer();
+    updateAnswerTimer();
+    currentTurn.responded = true;
+    [...answerOptions.querySelectorAll('.answer-option')].forEach((option) => {
+        option.disabled = true;
+    });
+    answerBox.classList.remove('is-correct');
+    answerBox.classList.add('is-incorrect');
+    answerBox.textContent = 'Se acabó el tiempo. Este turno no suma puntos.';
+    answerBox.hidden = false;
+    actions.hidden = false;
+    setGameStatus('TIEMPO AGOTADO');
+    document.getElementById('siguienteTurno').focus();
+}
+
+function getSpeedBonus(elapsedMilliseconds) {
+    if (elapsedMilliseconds <= 10_000) {
+        return 3;
+    }
+
+    if (elapsedMilliseconds <= 20_000) {
+        return 2;
+    }
+
+    return 1;
 }
 
 function drawWheel(context, canvas, segments, labelFor, colorFor, accentColor) {
@@ -342,14 +424,14 @@ function renderScoreboard() {
     );
 }
 
-function showPointsAnimation(index, button) {
+function showPointsAnimation(index, change, button) {
     const row = button?.closest('.score-row');
     const origin =
         row?.getBoundingClientRect() ??
         document.querySelectorAll('.score-row')[index]?.getBoundingClientRect();
     const pop = document.createElement('span');
     pop.className = 'score-pop';
-    pop.textContent = '+10';
+    pop.textContent = `+${change}`;
 
     if (origin) {
         pop.style.left = `${origin.left + origin.width * 0.68}px`;
@@ -367,7 +449,7 @@ function changeScore(index, change, button = null) {
     score[index] += change;
 
     if (change > 0) {
-        showPointsAnimation(index, button);
+        showPointsAnimation(index, change, button);
         playCorrectSound();
         celebrate();
     }
@@ -607,17 +689,25 @@ function resetQuestionCard() {
 }
 
 function setRemainingCount() {
-    const remaining = Math.min(gruposLibres.length, slotsLibres.length);
+    const remaining = slotsLibres.length;
     document.getElementById('quedan').textContent =
-        `${remaining} ${remaining === 1 ? 'TURNO' : 'TURNOS'}`;
+        `RONDA ${currentRound} DE ${roundCount} · ${remaining} ${remaining === 1 ? 'TURNO' : 'TURNOS'}`;
 }
 
 function renderFinalRanking() {
     const sortedGroups = score
-        .map((points, index) => ({ points, index }))
+        .map((points, index) => ({
+            points,
+            index,
+            correct: correctAnswers[index],
+            answerTime: correctAnswerTimes[index],
+        }))
         .sort(
             (first, second) =>
-                second.points - first.points || first.index - second.index,
+                second.points - first.points ||
+                second.correct - first.correct ||
+                first.answerTime - second.answerTime ||
+                first.index - second.index,
         );
     const positions = [
         { index: 1, className: 'podium-card--second', medal: '🥈' },
@@ -629,8 +719,8 @@ function renderFinalRanking() {
     podium.replaceChildren();
     ranking.replaceChildren();
 
-    positions.forEach(({ index, className, medal }) => {
-        const group = sortedGroups[index];
+    positions.forEach(({ index: position, className, medal }) => {
+        const group = sortedGroups[position];
         const card = document.createElement('div');
         card.className = `podium-card ${className}`;
         const medalIcon = document.createElement('span');
@@ -646,7 +736,7 @@ function renderFinalRanking() {
         podium.append(card);
     });
 
-    sortedGroups.forEach(({ points, index }, position) => {
+    sortedGroups.forEach(({ points, index, correct, answerTime }, position) => {
         const item = document.createElement('li');
         const rank = document.createElement('span');
         rank.className = 'final-ranking__rank';
@@ -656,12 +746,17 @@ function renderFinalRanking() {
         const total = document.createElement('span');
         total.className = 'final-ranking__score';
         total.textContent = `${points} PTS`;
-        item.append(rank, name, total);
+        const details = document.createElement('small');
+        details.className = 'final-ranking__details';
+        details.textContent = `${correct} correctas · ${(answerTime / 1000).toFixed(1)} s`;
+        item.append(rank, name, total, details);
         ranking.append(item);
     });
 }
 
 function finishGame() {
+    stopAnswerTimer();
+    answerTimer.hidden = true;
     isFinished = true;
     isSpinning = false;
     currentGroup = null;
@@ -674,7 +769,7 @@ function finishGame() {
     answerBox.classList.remove('is-correct', 'is-incorrect');
     document.getElementById('finalPanel').hidden = false;
     questionHeading.textContent =
-        '¡Ya pasaron todos los grupos! Fin del juego.';
+        '¡Se completaron las dos rondas! Fin del juego.';
     questionHeading.hidden = true;
     document.querySelector('.question-card__quote').hidden = true;
     document.getElementById('txtGrupo').textContent = '¡Todos jugaron!';
@@ -683,6 +778,8 @@ function finishGame() {
     spinButton.disabled = true;
     spinButton.classList.remove('is-ready', 'is-spinning');
     spinButtonLabel.textContent = '¡PARTIDA COMPLETADA!';
+    document.getElementById('turnoActual').textContent =
+        `DOS RONDAS COMPLETADAS · ${questionCount} PREGUNTAS`;
     document.getElementById('otraVez').focus();
 
     if (!reducedMotion.matches) {
@@ -703,6 +800,7 @@ async function startGame() {
     try {
         const game = await requestJson(routes.start, 'POST');
         questionCount = game.total;
+        currentRound = 1;
         gruposLibres = Array.from({ length: groupCount }, (_, index) => index);
         slotsLibres = Array.from(
             { length: questionCount },
@@ -713,6 +811,10 @@ async function startGame() {
         isFinished = false;
         isSpinning = false;
         score.fill(0);
+        correctAnswers.fill(0);
+        correctAnswerTimes.fill(0);
+        stopAnswerTimer();
+        answerTimer.hidden = true;
         drawWheels();
         renderScoreboard();
         setRemainingCount();
@@ -828,6 +930,8 @@ async function spinWheels() {
     }
 
     isSpinning = true;
+    stopAnswerTimer();
+    answerTimer.hidden = true;
     spinButton.disabled = true;
     spinButton.classList.remove('is-ready');
     spinButton.classList.add('is-spinning');
@@ -863,6 +967,12 @@ async function spinWheels() {
         if (
             !Number.isInteger(turn.grupo) ||
             !Number.isInteger(turn.slot) ||
+            !Number.isInteger(turn.ronda) ||
+            !Number.isInteger(turn.turno) ||
+            !Number.isInteger(turn.turnoRonda) ||
+            turn.ronda !== currentRound ||
+            turn.turnoRonda !== groupCount - gruposLibres.length + 1 ||
+            turn.turno !== questionCount - slotsLibres.length + 1 ||
             groupIndex < 0 ||
             questionIndex < 0 ||
             !Array.isArray(turn.opciones) ||
@@ -896,11 +1006,10 @@ async function spinWheels() {
         removeTurnFromWheels(turn.grupo, turn.slot);
         currentTurn = { ...turn, responded: false };
         currentGroup = turn.grupo;
-        const turnoActual = groupCount - gruposLibres.length;
         document.getElementById('txtGrupo').textContent =
-            `TURNO ${turnoActual}: GRUPO G${teamNumbers[turn.grupo]}`;
+            `RONDA ${turn.ronda} · TURNO ${turn.turnoRonda}: GRUPO G${teamNumbers[turn.grupo]}`;
         document.getElementById('turnoActual').textContent =
-            `TURNO ${turnoActual} DE ${groupCount}`;
+            `RONDA ${turn.ronda} DE ${roundCount} · TURNO ${turn.turnoRonda} DE ${groupCount}`;
         document.getElementById('txtNum').textContent =
             `PREGUNTA ${turn.slot + 1}`;
         questionHeading.textContent = turn.pregunta;
@@ -910,6 +1019,7 @@ async function spinWheels() {
         answerBox.hidden = true;
         actions.hidden = true;
         renderAnswerOptions(turn.opciones);
+        startAnswerTimer();
         renderScoreboard();
         setRemainingCount();
         setGameStatus('EQUIPO EN JUEGO');
@@ -967,6 +1077,16 @@ async function submitAnswer(optionIndex) {
         return;
     }
 
+    const elapsedMilliseconds = performance.now() - questionStartedAt;
+
+    if (elapsedMilliseconds >= answerTimeLimit * 1000) {
+        expireCurrentQuestion();
+
+        return;
+    }
+
+    updateAnswerTimer();
+    stopAnswerTimer();
     const options = [...answerOptions.querySelectorAll('.answer-option')];
     options.forEach((option) => {
         option.disabled = true;
@@ -999,9 +1119,13 @@ async function submitAnswer(optionIndex) {
 
         if (result.correcta) {
             options[optionIndex]?.classList.add('is-selected-correct');
-            changeScore(currentTurn.grupo, 10);
+            const bonus = getSpeedBonus(elapsedMilliseconds);
+            const pointsEarned = 10 + bonus;
+            correctAnswers[currentTurn.grupo]++;
+            correctAnswerTimes[currentTurn.grupo] += elapsedMilliseconds;
+            changeScore(currentTurn.grupo, pointsEarned);
             answerBox.classList.add('is-correct');
-            answerBox.textContent = `¡Correcto! El grupo gana 10 puntos. Respuesta: ${result.respuesta}`;
+            answerBox.textContent = `¡Correcto! +10 puntos y +${bonus} por rapidez: ${pointsEarned} puntos. Respuesta: ${result.respuesta}`;
             setGameStatus('¡RESPUESTA CORRECTA!');
         } else {
             options[optionIndex]?.classList.add('is-selected-wrong');
@@ -1014,9 +1138,16 @@ async function submitAnswer(optionIndex) {
         actions.hidden = false;
         document.getElementById('siguienteTurno').focus();
     } catch (error) {
+        if (answerDeadline - performance.now() <= 0) {
+            expireCurrentQuestion();
+
+            return;
+        }
+
         options.forEach((option) => {
             option.disabled = false;
         });
+        startAnswerTimer(answerDeadline);
         setError(error.message);
     }
 }
@@ -1030,17 +1161,34 @@ function nextTurn() {
     answerOptions.hidden = true;
     answerBox.hidden = true;
 
-    if (currentTurn.quedan === 0 || gruposLibres.length === 0) {
+    if (currentTurn.quedan === 0) {
         finishGame();
 
         return;
     }
 
+    if (gruposLibres.length === 0) {
+        currentRound++;
+        gruposLibres = Array.from({ length: groupCount }, (_, index) => index);
+        drawWheels();
+        document.getElementById('txtGrupo').textContent =
+            `RONDA ${currentRound}: TODOS LISTOS`;
+        document.getElementById('txtNum').textContent =
+            `${slotsLibres.length} PREGUNTAS RESTANTES`;
+        document.getElementById('turnoActual').textContent =
+            `RONDA ${currentRound} DE ${roundCount} · TODOS LISTOS`;
+    }
+
+    setRemainingCount();
     currentGroup = null;
     renderScoreboard();
     spinButton.disabled = false;
     spinButton.classList.add('is-ready');
-    setGameStatus('SIGUIENTE TURNO');
+    setGameStatus(
+        gruposLibres.length === groupCount
+            ? `COMIENZA LA RONDA ${currentRound}`
+            : 'SIGUIENTE TURNO',
+    );
 }
 
 spinButton.addEventListener('click', spinWheels);

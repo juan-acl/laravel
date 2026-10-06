@@ -10,7 +10,9 @@ class RuletaController extends Controller
 {
     private const GRUPOS = 7;
 
-    private const PREGUNTAS = 7;
+    private const RONDAS = 2;
+
+    private const PREGUNTAS = self::GRUPOS * self::RONDAS;
 
     private const BANCO = [
         [
@@ -124,6 +126,7 @@ class RuletaController extends Controller
         return view('ruleta', [
             'grupos' => self::GRUPOS,
             'total' => self::PREGUNTAS,
+            'rondas' => self::RONDAS,
         ]);
     }
 
@@ -143,6 +146,7 @@ class RuletaController extends Controller
             'grupos_usados' => [],
             'opciones' => [],
             'respondidas' => [],
+            'turnos_jugados' => 0,
         ]]);
 
         return response()->json(['total' => count($preguntas)]);
@@ -152,6 +156,11 @@ class RuletaController extends Controller
     {
         $ruleta = session('ruleta');
         abort_if(! $ruleta, 409, 'Partida no iniciada');
+
+        $turnosJugados = $ruleta['turnos_jugados'];
+        if ($turnosJugados >= self::PREGUNTAS) {
+            return response()->json(['fin' => true]);
+        }
 
         $gruposLibres = array_values(array_diff(
             range(0, self::GRUPOS - 1),
@@ -178,18 +187,25 @@ class RuletaController extends Controller
         $opciones[] = $respuestaCorrecta;
         shuffle($opciones);
 
-        $ruleta['grupos_usados'][] = $grupo;
+        $gruposUsados = [...$ruleta['grupos_usados'], $grupo];
         $ruleta['usadas'][] = $slot;
         $ruleta['opciones'][$slot] = $opciones;
+        $ruleta['turnos_jugados']++;
+        $ruleta['grupos_usados'] = count($gruposUsados) === self::GRUPOS
+            ? []
+            : $gruposUsados;
         session(['ruleta' => $ruleta]);
 
         return response()->json([
             'grupo' => $grupo,
             'slot' => $slot,
+            'ronda' => intdiv($turnosJugados, self::GRUPOS) + 1,
+            'turno' => $turnosJugados + 1,
+            'turnoRonda' => ($turnosJugados % self::GRUPOS) + 1,
             'pregunta' => $ruleta['preguntas'][$slot]['pregunta'],
             'opciones' => $opciones,
-            'quedan' => min(count($gruposLibres), count($preguntasLibres)) - 1,
-            'gruposUsados' => $ruleta['grupos_usados'],
+            'quedan' => self::PREGUNTAS - $ruleta['turnos_jugados'],
+            'gruposUsados' => $gruposUsados,
         ]);
     }
 
